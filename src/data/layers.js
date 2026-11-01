@@ -1,0 +1,80 @@
+export const LAYERS = [
+  {
+    id: 'A',
+    name: 'Advisories',
+    sub: 'Embassies, consulates, official travel notices',
+    icon: 'ShieldAlert',
+    captions: [
+      'Queued...',
+      'Checking foreign ministry bulletins...',
+      'Cross-referencing consular health & security advisories...',
+      'Verifying passport validity & visa timelines...',
+      'Advisories cleared. Zero active embargoes or travel bans.',
+    ],
+  },
+  {
+    id: 'B',
+    name: 'Local News',
+    sub: 'Regional press, police blotters, municipal updates',
+    icon: 'Newspaper',
+    captions: [
+      'Queued...',
+      'Translating regional headlines over morning espresso...',
+      'Filtering clickbait panic from genuine civic notices...',
+      'Checking for airport tarmac delays and taxi guild meetings...',
+      'Local news vetted. Municipal systems operating normally.',
+    ],
+  },
+  {
+    id: 'C',
+    name: 'Social Vibe',
+    sub: 'Reddit threads, Telegram channels, local chatter',
+    icon: 'MessageCircle',
+    captions: [
+      'Queued...',
+      'Skimming local subreddits so you do not have to...',
+      'Investigating recent tourist gripe threads...',
+      'Checking neighborhood vibe reports & safety perceptions...',
+      'Sentiment stable. Ambient drama level: 2/10.',
+    ],
+  },
+  {
+    id: 'D',
+    name: 'Weather',
+    sub: 'Microclimate models, precipitation, UV & air quality',
+    icon: 'CloudSun',
+    captions: [
+      'Queued...',
+      'Querying multi-satellite atmospheric radar...',
+      'Checking midday cobblestone heat & humidity indexes...',
+      'Negotiating with cloud cover for optimal golden hours...',
+      'Forecast logged. Pack light shell and sunscreen.',
+    ],
+  },
+  {
+    id: 'E',
+    name: 'Events & Transit',
+    sub: 'Strikes, festivals, stadium games, transit maintenance',
+    icon: 'Calendar',
+    captions: [
+      'Queued...',
+      'Scanning union strike bulletins & transit line outages...',
+      'Cross-referencing major concerts, matches, and rallies...',
+      'Checking route walkability and detour options...',
+      'Calendar synchronized. Transit windows mapped.',
+    ],
+  },
+];
+
+export const FUN_FACTS = [
+  "Visited 42 primary sources so you didn't have to doomscroll.",
+  "Saved approximately 3.4 hours of panicked Reddit browsing.",
+  "Zero hallucinated warnings. Every alert cross-verified.",
+  "Consulted with the local pigeon federation. They report calm skies.",
+  "Filtered out 14 sensationalized headlines designed to induce panic.",
+  "Spoke to an espresso-fueled goose stationed at the consulate.",
+  "Calculated optimal walking routes with minimum escalator anxiety.",
+  "Checked restaurant opening hours — yes, you can get late dinner.",
+  "Tested air-traffic clearance with three coastal seagulls.",
+  "All systems green. The bureau remains functional, calm, and honking.",
+];

@@ -7,3 +7,7 @@ dist/
 # Logs & OS junk
 *.log
 .DS_Store
+
+# Environment secrets — API keys live here, never commit
+.env
+server/.env

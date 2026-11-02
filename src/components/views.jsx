@@ -1773,7 +1773,7 @@ function StaticDemoBriefView({ state, setState, onNav, voice, brief: rawBrief })
       <div className="brief-head">
         <div className="brief-head-main">
           <div className="brief-eyebrow">
-            goose investigation · {voice.name.toLowerCase()} voice · pre-rendered demo
+            goose investigation · {voice.name.toLowerCase()} voice · {brief.ai_generated ? 'live llama briefing' : 'pre-rendered demo'}
           </div>
           <h1 className="brief-h1">
             {dest}<span className="brief-h1-dot">.</span>
@@ -1787,6 +1787,9 @@ function StaticDemoBriefView({ state, setState, onNav, voice, brief: rawBrief })
             </div>
             <div className="meta-pill"><span className="mp-k">voice</span> {voice.name}</div>
             <div className="meta-pill"><span className="mp-k">sources</span> {totalSources} verified</div>
+            {brief.ai_generated && (
+              <div className="meta-pill"><span className="mp-k">⚡ generated live by</span> Llama</div>
+            )}
             <div className="meta-pill meta-pill-saved">
               <span className="mp-k">saved you</span> {(() => {
                 const m = state.savedMinutes ?? 360;

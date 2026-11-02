@@ -95,6 +95,20 @@ function App() {
     cairo: 'dont_go',
   };
 
+  // Builds an instant local brief — no server, no API key needed.
+  // Used as fallback when the backend is down or Llama isn't configured.
+  const runLocalFallback = (query, voice) => {
+    const profile = getDestinationProfile(query, voice);
+    const synth = buildSynthesizedBrief(profile, query, voice);
+    setState(s => ({
+      ...s,
+      brief: { status: 'complete', brief: synth, audio_url: null },
+      briefStatus: 'complete',
+      voiceId: voice,
+    }));
+    nav('brief');
+  };
+
   const submitBrief = async (q, scenario) => {
     const destination = q.split(/[\s,]/)[0] || 'Rome';
 
@@ -141,24 +155,12 @@ function App() {
     nav('loading');
 
     // ── Any city on Earth ────────────────────────────────────────────────
-    // Non-demo cities (Ujjain, Varanasi, Goa, Paris, anywhere) skip the
-    // backend entirely and build an instant local brief: curated profiles
-    // for popular Indian destinations + a universal synthesizer for the rest.
-    if (!isDemoCity) {
-      const profile = getDestinationProfile(q, backendVoice);
-      const synth = buildSynthesizedBrief(profile, q, backendVoice);
-      setTimeout(() => {
-        setState(s => ({
-          ...s,
-          brief: { status: 'complete', brief: synth, audio_url: null },
-          briefStatus: 'complete',
-          voiceId: backendVoice,
-        }));
-        nav('brief');
-      }, 4500);
-      return;
-    }
-
+    // Demo cities (Rome, NYC, Tokyo…) use pre-rendered briefs with audio.
+    // Every other city (Ujjain, Varanasi, Jaipur, Paris, anywhere) goes to
+    // the backend, which generates a live brief with Llama. If the server
+    // is down or no API key is configured (503), we fall back to the local
+    // synthesizer: curated profiles for popular Indian destinations plus a
+    // universal generator for the rest.
     try {
       const res = await fetch('/api/brief', {
         method: 'POST',
@@ -172,7 +174,12 @@ function App() {
       const { result_id } = await res.json();
       setState(s => ({ ...s, query_id: result_id, briefStatus: 'pending' }));
     } catch (e) {
-      // Client-side resilient fallback to local demo brief
+      // Non-demo city → local synthesizer fallback (curated + universal)
+      if (!isDemoCity) {
+        setTimeout(() => runLocalFallback(q, backendVoice), 3000);
+        return;
+      }
+      // Demo city → client-side resilient fallback to local demo brief file
       const cityKey = (lockedCity || 'rome').replace(/\s+/g, '_');
       try {
         const localRes = await fetch(`/demo-briefs/${cityKey}.json`);
@@ -204,6 +211,11 @@ function App() {
       attempts++;
       try {
         const res = await fetch(`/api/brief/${state.query_id}`);
+        // Server restarted / unknown id → local fallback for non-demo cities
+        if (res.status === 404 && state.localBrief) {
+          runLocalFallback(state.query, state.voiceId);
+          return;
+        }
         if (!res.ok) throw new Error(`GET /api/brief/${state.query_id} ${res.status}`);
         const data = await res.json();
         if (data.status === 'complete') {
@@ -216,16 +228,26 @@ function App() {
           return;
         }
         if (data.status === 'failed') {
+          // Llama call failed → local fallback for non-demo cities
+          if (state.localBrief) {
+            runLocalFallback(state.query, state.voiceId);
+            return;
+          }
           setState(s => ({ ...s, briefStatus: 'failed', briefError: data.error ?? 'failed' }));
           return;
         }
       } catch (e) {
         if (attempts >= POLL_MAX) {
+          if (state.localBrief) {
+            runLocalFallback(state.query, state.voiceId);
+            return;
+          }
           setState(s => ({ ...s, briefStatus: 'failed', briefError: 'timeout' }));
           return;
         }
       }
       if (attempts < POLL_MAX) setTimeout(tick, POLL_MS);
+      else if (state.localBrief) runLocalFallback(state.query, state.voiceId);
       else setState(s => ({ ...s, briefStatus: 'failed', briefError: 'timeout' }));
     };
     setTimeout(tick, POLL_MS);

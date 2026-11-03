@@ -1466,7 +1466,7 @@ function BriefView({ state, setState, onNav }) {
         </GooseBubble>
       </div>
 
-      <AudioPlayer voice={voice} audioUrl={state.brief?.audio_url} />
+      <AudioPlayer voice={voice} audioUrl={state.brief?.audio_url} narration={buildNarration(state.brief?.brief)} />
     </div>);
 
 }
@@ -2064,7 +2064,7 @@ function StaticDemoBriefView({ state, setState, onNav, voice, brief: rawBrief })
       </div>
 
       <AudioArrow />
-      <AudioPlayer voice={voice} audioUrl={state.brief?.audio_url} />
+      <AudioPlayer voice={voice} audioUrl={state.brief?.audio_url} narration={buildNarration(brief)} />
     </div>
   );
 }
@@ -2283,7 +2283,37 @@ function DontGoBanner({ voice, isRuiner }) {
 
 }
 
-function AudioPlayer({ voice, audioUrl }) {
+// Builds a ~60-second spoken narration from a brief's known schema.
+// Used by AudioPlayer when no pre-rendered audio file exists — the brief is
+// narrated live by the browser's speech engine, tuned per voice persona.
+function buildNarration(brief) {
+  if (!brief) return '';
+  const strip = (md = '') => md.replace(/\*\*/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^[\s\-*>#_]+/gm, '').trim();
+  const parts = [];
+  const q = brief.quick_read || {};
+  if (brief.destination) parts.push(`Here is your pre-trip brief for ${brief.destination}.`);
+  if (q.intro_md) parts.push(strip(q.intro_md));
+  const w = brief.weather_stats;
+  if (w?.temp) parts.push(`Weather: ${w.temp}, ${w.condition}. High of ${w.high}, low of ${w.low}. UV index ${w.uv}.`);
+  else if (q.weather_md) parts.push(strip(q.weather_md));
+  const b = brief.budget_stats;
+  if (b?.avgDaily) parts.push(`Budget: around ${b.avgDaily} per day. ${b.note || ''}`);
+  const places = brief.places_with_images || [];
+  if (places.length) parts.push(`Top places to see: ${places.map((p) => p.name).join(', ')}.`);
+  const eats = brief.famous_eats || [];
+  if (eats.length) parts.push(`Where to eat: ${eats.map((e) => `${e.name}, for ${e.dish}`).join('. ')}.`);
+  if (q.do_now_md) {
+    const tips = strip(q.do_now_md).split('\n').map((t) => t.trim()).filter(Boolean).slice(0, 4);
+    if (tips.length) parts.push(`Before you go: ${tips.join('. ')}.`);
+  }
+  parts.push("That's the brief. The goose has flown.");
+  return parts.join(' ');
+}
+
+// Persona flavor for browser speech — pitch per voice id.
+const TTS_PITCH = { jarvis: 0.9, bro: 1.1, bestie: 1.3, family: 1.0, pet_parent: 1.2, dont_go: 0.7, ruiner: 0.7 };
+
+function AudioPlayer({ voice, audioUrl, narration }) {
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
   const [speed, setSpeed] = useState('1.0');
@@ -2291,10 +2321,15 @@ function AudioPlayer({ voice, audioUrl }) {
   const [total, setTotal] = useState(38);
   const trackRef = useRef(null);
   const audioRef = useRef(null);
+  const utterRef = useRef(null);
+  const posRef = useRef(0);
+  useEffect(() => { posRef.current = pos; }, [pos]);
 
-  // Phase 11 design integration — bind real HTMLAudioElement when audioUrl present.
-  // audioUrl is signed Supabase Storage URL from briefs.audio_url. Falls back
-  // to mock animation when missing (e.g., text-only-fallback path).
+  // TTS mode: no audio file, but narration text + browser speech synthesis.
+  const useTts = !audioUrl && !!narration && typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+  // Bind real HTMLAudioElement when audioUrl present. Falls back to live
+  // speech synthesis (TTS) when narration exists, mock animation otherwise.
   useEffect(() => {
     if (!audioUrl) return;
     const a = new Audio(audioUrl);
@@ -2314,12 +2349,50 @@ function AudioPlayer({ voice, audioUrl }) {
     };
   }, [audioUrl]);
 
-  // Real playback control when bound to HTMLAudioElement, mock otherwise
+  // TTS: estimate spoken duration (~150 wpm at 1.0×); stop speech on change/unmount.
+  useEffect(() => {
+    if (!useTts) return;
+    const words = narration.split(/\s+/).filter(Boolean).length;
+    setTotal(Math.max(20, Math.round(words / 2.5)));
+    return () => window.speechSynthesis.cancel();
+  }, [narration, useTts]);
+
+  const speakFrom = (charOffset) => {
+    const u = new SpeechSynthesisUtterance(narration.slice(charOffset));
+    u.rate = parseFloat(speed);
+    u.pitch = TTS_PITCH[voice?.id] ?? 1.0;
+    u.onboundary = (e) => {
+      if (typeof e.charIndex === 'number') {
+        setPos(((charOffset + e.charIndex) / narration.length) * total);
+      }
+    };
+    u.onend = () => {
+      if (utterRef.current !== u) return; // superseded by seek/speed restart
+      utterRef.current = null;
+      setPlaying(false);
+      setPos(0);
+    };
+    u.onerror = () => { if (utterRef.current === u) { utterRef.current = null; setPlaying(false); } };
+    utterRef.current = u;
+    window.speechSynthesis.cancel(); // previous utterance's onend is ignored via ref check
+    window.speechSynthesis.speak(u);
+  };
+
+  // Real playback control when bound to HTMLAudioElement, TTS, or mock
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.playbackRate = parseFloat(speed);
       if (playing) audioRef.current.play().catch(() => setPlaying(false));
       else audioRef.current.pause();
+      return;
+    }
+    if (useTts) {
+      if (playing) {
+        if (window.speechSynthesis.paused && utterRef.current) window.speechSynthesis.resume();
+        else speakFrom(Math.round((posRef.current / total) * narration.length) || 0);
+      } else if (utterRef.current) {
+        window.speechSynthesis.pause();
+      }
       return;
     }
     // Mock animation fallback
@@ -2342,6 +2415,7 @@ function AudioPlayer({ voice, audioUrl }) {
     const next = ratio * total;
     setPos(next);
     if (audioRef.current) audioRef.current.currentTime = next;
+    else if (useTts && playing) speakFrom(Math.round(ratio * narration.length));
   };
 
   const onDown = (e) => {setDragging(true);seekFromEvent(e);};

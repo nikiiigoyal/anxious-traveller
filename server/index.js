@@ -81,30 +81,52 @@ async function callLlama(destination, voice) {
     'Use realistic current-season weather. Real landmark and restaurant names only — never placeholders.',
   ].join(' ');
 
-  const res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+  const payload = {
+    model: LLM_MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: `Create the pre-trip brief for: ${destination}` },
+    ],
+    temperature: 0.7,
+    // High cap: Muse Spark spends reasoning tokens before content —
+    // a low cap leaves zero tokens for the actual JSON output.
+    max_tokens: 8000,
+    response_format: { type: 'json_object' },
+  };
+
+  let res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${LLM_API_KEY}`,
     },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: `Create the pre-trip brief for: ${destination}` },
-      ],
-      temperature: 0.7,
-      max_tokens: 1800,
-      response_format: { type: 'json_object' },
-    }),
+    body: JSON.stringify(payload),
   });
+
+  // Some providers reject response_format — retry once without it
+  if (res.status === 400) {
+    delete payload.response_format;
+    res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${LLM_API_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    });
+  }
 
   if (!res.ok) {
     const body = (await res.text()).slice(0, 200);
     throw new Error(`LLM API ${res.status}: ${body}`);
   }
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content || '';
+  const rawText = await res.text();
+  console.log(`[llama] HTTP ${res.status}, response ${rawText.length} chars, head: ${rawText.slice(0, 150).replace(/\n/g, ' ')}`);
+  const data = JSON.parse(rawText);
+  let content = data.choices?.[0]?.message?.content || '';
+  console.log(`[llama] content ${content.length} chars, finish: ${data.choices?.[0]?.finish_reason}`);
+  // Tolerate models that wrap JSON in markdown fences
+  content = content.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
   return JSON.parse(content);
 }
 

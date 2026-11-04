@@ -1,12 +1,14 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Demo briefs are imported statically (not read with fs at runtime) so they are
+// bundled into the Vercel Function along with this file.
+import rome from './demo-briefs/rome.json' with { type: 'json' };
+import newYork from './demo-briefs/new_york.json' with { type: 'json' };
+import tokyo from './demo-briefs/tokyo.json' with { type: 'json' };
+import reykjavik from './demo-briefs/reykjavik.json' with { type: 'json' };
+import bangkok from './demo-briefs/bangkok.json' with { type: 'json' };
+import cairo from './demo-briefs/cairo.json' with { type: 'json' };
 
 const app = express();
 const PORT = process.env.PORT || 3005;
@@ -14,21 +16,20 @@ const PORT = process.env.PORT || 3005;
 app.use(cors());
 app.use(express.json());
 
-const DEMO_BRIEFS_DIR = path.resolve(__dirname, '../public/demo-briefs');
-
-// City to demo brief file mapping
+// City → demo brief
 const CITY_MAP = {
-  rome: 'rome.json',
-  'new york': 'new_york.json',
-  newyork: 'new_york.json',
-  nyc: 'new_york.json',
-  tokyo: 'tokyo.json',
-  reykjavik: 'reykjavik.json',
-  bangkok: 'bangkok.json',
-  cairo: 'cairo.json',
+  rome,
+  'new york': newYork,
+  newyork: newYork,
+  nyc: newYork,
+  tokyo,
+  reykjavik,
+  bangkok,
+  cairo,
 };
 
-// In-memory store for briefs
+// In-memory store for briefs. Only a cache: on Vercel each request may run on
+// a different instance, so POST /api/brief also returns the finished brief.
 const activeBriefs = new Map();
 
 // ─────────────────────────────────────────────────────────────
@@ -219,8 +220,9 @@ async function fetchPlaceImage(placeName, destination) {
   return null;
 }
 
-// Fire-and-forget: fills activeBriefs[result_id] when done; polled via GET /api/brief/:id
+// Generates a live brief, caches it in activeBriefs and returns the entry.
 async function generateBriefWithLlama(destination, voice, result_id) {
+  let entry;
   try {
     console.log(`[llama] generating brief for "${destination}" (${voice})…`);
     const raw = await callLlama(destination, voice);
@@ -234,7 +236,7 @@ async function generateBriefWithLlama(destination, voice, result_id) {
       })
     );
 
-    activeBriefs.set(result_id, {
+    entry = {
       status: 'complete',
       brief_id: result_id,
       query_id: result_id,
@@ -244,17 +246,19 @@ async function generateBriefWithLlama(destination, voice, result_id) {
       audio_source: 'llama-live',
       ai_generated: true,
       created_at: new Date().toISOString(),
-    });
+    };
     console.log(`[llama] brief ready for "${destination}" (${result_id})`);
   } catch (e) {
     console.error(`[llama] generation failed for "${destination}":`, e.message);
-    activeBriefs.set(result_id, {
+    entry = {
       status: 'failed',
       error: String(e.message || e),
       voice,
       created_at: new Date().toISOString(),
-    });
+    };
   }
+  activeBriefs.set(result_id, entry);
+  return entry;
 }
 
 app.get('/api/health', (req, res) => {
@@ -269,23 +273,23 @@ app.get('/api/health', (req, res) => {
  * POST /api/brief
  * Starts a brief investigation and returns { result_id }
  */
-app.post('/api/brief', (req, res) => {
+app.post('/api/brief', async (req, res) => {
   const { destination = 'Rome', voice = 'bro' } = req.body;
   const lowerDest = destination.toLowerCase();
 
-  // Find matching city
-  let matchedFile = null;
+  // Find matching demo city
+  let demo = null;
   let matchedCity = 'rome';
-  for (const [key, file] of Object.entries(CITY_MAP)) {
+  for (const [key, data] of Object.entries(CITY_MAP)) {
     if (lowerDest.includes(key)) {
-      matchedFile = file;
+      demo = data;
       matchedCity = key;
       break;
     }
   }
 
   // ── Any other city on Earth → live Llama generation ──────────
-  if (!matchedFile) {
+  if (!demo) {
     if (!llmConfigured()) {
       // No key configured — tell the client to use its local fallback briefs
       return res.status(503).json({
@@ -294,50 +298,27 @@ app.post('/api/brief', (req, res) => {
       });
     }
     const result_id = `live-${voice}-${Date.now()}`;
-    activeBriefs.set(result_id, {
-      status: 'pending',
-      brief_id: result_id,
-      query_id: result_id,
-      voice,
-      created_at: new Date().toISOString(),
-    });
-    generateBriefWithLlama(destination, voice, result_id); // async; polled via GET
-    return res.json({ result_id });
+    // Generated within this request: serverless functions may be frozen after
+    // the response is sent, so background work is not reliable.
+    const entry = await generateBriefWithLlama(destination, voice, result_id);
+    return res.json({ result_id, ...entry });
   }
 
   const result_id = `demo-${matchedCity.replace(/\s+/g, '-')}-${voice}-${Date.now()}`;
-
-  let briefData = null;
-  if (fs.existsSync(path.join(DEMO_BRIEFS_DIR, matchedFile))) {
-    try {
-      const raw = fs.readFileSync(path.join(DEMO_BRIEFS_DIR, matchedFile), 'utf8');
-      briefData = JSON.parse(raw);
-    } catch (e) {
-      console.error('Error reading demo brief:', e);
-    }
-  }
-
-  // Fallback if custom city or file not found
-  if (!briefData) {
-    const rawRome = fs.readFileSync(path.join(DEMO_BRIEFS_DIR, 'rome.json'), 'utf8');
-    briefData = JSON.parse(rawRome);
-    briefData.brief.destination = destination;
-  }
-
-  activeBriefs.set(result_id, {
+  const entry = {
     status: 'complete',
     brief_id: result_id,
     query_id: result_id,
-    voice: briefData.voice || voice,
-    brief: briefData.brief,
-    audio_url: briefData.audio_url || null,
+    voice: demo.voice || voice,
+    brief: demo.brief,
+    audio_url: demo.audio_url || null,
     audio_source: 'demo-static',
     audit_passed: true,
     fallback_used: false,
     created_at: new Date().toISOString(),
-  });
-
-  res.json({ result_id });
+  };
+  activeBriefs.set(result_id, entry);
+  res.json({ result_id, ...entry });
 });
 
 /**
@@ -349,26 +330,19 @@ app.get('/api/brief/:id', (req, res) => {
   const found = activeBriefs.get(id);
 
   if (!found) {
-    // If not found in memory, check if ID starts with demo-
-    const parts = id.split('-');
-    const cityKey = parts[1]?.replace('_', ' ') || 'rome';
-    const fileName = CITY_MAP[cityKey] || 'rome.json';
-    const filePath = path.join(DEMO_BRIEFS_DIR, fileName);
-
-    if (fs.existsSync(filePath)) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        return res.json({
-          status: 'complete',
-          brief_id: id,
-          query_id: id,
-          voice: raw.voice || 'bro',
-          brief: raw.brief,
-          audio_url: raw.audio_url || null,
-        });
-      } catch (err) {
-        // fallback
-      }
+    // Not in this instance's memory: rebuild demo briefs from the id
+    // (demo-<city>-<voice>-<ts>). Live briefs can't be rebuilt → 404.
+    const cityKey = id.startsWith('demo-') ? id.split('-')[1]?.replace('_', ' ') : null;
+    const demo = cityKey && CITY_MAP[cityKey];
+    if (demo) {
+      return res.json({
+        status: 'complete',
+        brief_id: id,
+        query_id: id,
+        voice: demo.voice || 'bro',
+        brief: demo.brief,
+        audio_url: demo.audio_url || null,
+      });
     }
     return res.status(404).json({ error: 'Brief not found' });
   }
@@ -376,6 +350,11 @@ app.get('/api/brief/:id', (req, res) => {
   res.json(found);
 });
 
-app.listen(PORT, () => {
-  console.log(`[Anxious Traveller Bureau Server] Ready on http://localhost:${PORT}`);
-});
+// On Vercel the exported app becomes a Function; locally we listen on a port.
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`[Anxious Traveller Bureau Server] Ready on http://localhost:${PORT}`);
+  });
+}
+
+export default app;

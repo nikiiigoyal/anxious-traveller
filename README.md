@@ -55,7 +55,7 @@ Anxious Traveller is a pre-trip briefing app for people who worry before they tr
      (Rome, New York, Tokyo,          Ask Llama to write a          Frontend builds a brief
       Reykjavik, Bangkok, Cairo)      brief as JSON, in the         locally from built-in
       Load a ready-made brief         chosen voice                  destination profiles
-      from public/demo-briefs/
+      from server/demo-briefs/
                        └─────────────────────────┼──────────────────────────┘
                                                  │ 3. frontend polls
                                                  │    GET /api/brief/:id
@@ -110,10 +110,10 @@ anxious-traveller/
 │   │   ├── translations.js  # English / Hindi strings
 │   │   └── voices.js
 │   └── styles/bureau.css
-├── public/
-│   └── demo-briefs/         # Ready-made briefs for the 6 demo cities
+├── vercel.json              # Vercel deployment config (frontend + API services)
 └── server/
     ├── index.js             # Express API + Llama integration
+    ├── demo-briefs/         # Ready-made briefs for the 6 demo cities
     └── .env.example         # Template for your API settings
 ```
 

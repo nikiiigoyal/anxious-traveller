@@ -16,6 +16,10 @@ import {
 
 
 
+// Demo briefs live with the server (so they're bundled into its Function).
+// Lazily imported here only for the offline fallback when the API is down.
+const DEMO_BRIEF_FILES = import.meta.glob('../server/demo-briefs/*.json');
+
 function voiceLabel(id) {
   const v = (typeof VOICES !== 'undefined' ? VOICES : []).find(v => v.id === id);
   return v ? v.name : id;
@@ -136,6 +140,7 @@ function App() {
     // Pick a session-stable random "saved hours" value so loading counter
     // and brief meta pill stay in sync. 3.8h..6.5h in minute granularity.
     const savedMinutes = Math.floor(230 + Math.random() * 160);
+    const submitStartedAt = Date.now();
 
     setState(s => ({
       ...s,
@@ -147,7 +152,7 @@ function App() {
       brief: null,
       briefStatus: 'submitting',
       voiceSwapNotice,
-      queryStartedAt: Date.now(),
+      queryStartedAt: submitStartedAt,
       isDemoCity,
       localBrief: !isDemoCity,
       savedMinutes,
@@ -171,8 +176,23 @@ function App() {
         }),
       });
       if (!res.ok) throw new Error(`POST /api/brief ${res.status}`);
-      const { result_id } = await res.json();
-      setState(s => ({ ...s, query_id: result_id, briefStatus: 'pending' }));
+      const data = await res.json();
+      // The server returns the finished brief in the POST response (needed on
+      // serverless, where a later poll may hit an instance that never saw it).
+      if (data.status === 'complete') {
+        const remaining = Math.max(0, MIN_LOAD_MS - (Date.now() - submitStartedAt));
+        setTimeout(() => {
+          setState(s => ({ ...s, query_id: data.result_id, brief: data, briefStatus: 'complete', voiceId: data.voice || backendVoice }));
+          nav('brief');
+        }, remaining);
+        return;
+      }
+      if (data.status === 'failed') {
+        if (!isDemoCity) { runLocalFallback(q, backendVoice); return; }
+        setState(s => ({ ...s, briefStatus: 'failed', briefError: data.error ?? 'failed' }));
+        return;
+      }
+      setState(s => ({ ...s, query_id: data.result_id, briefStatus: 'pending' }));
     } catch (e) {
       // Non-demo city → local synthesizer fallback (curated + universal)
       if (!isDemoCity) {
@@ -180,11 +200,11 @@ function App() {
         return;
       }
       // Demo city → client-side resilient fallback to local demo brief file
-      const cityKey = (lockedCity || 'rome').replace(/\s+/g, '_');
+      const cityKey = (lockedCity || 'rome').replace(/[\s-]+/g, '_').replace(/^(newyork|nyc)$/, 'new_york');
       try {
-        const localRes = await fetch(`/demo-briefs/${cityKey}.json`);
-        if (localRes.ok) {
-          const localData = await localRes.json();
+        const loader = DEMO_BRIEF_FILES[`../server/demo-briefs/${cityKey}.json`];
+        if (loader) {
+          const localData = (await loader()).default;
           setTimeout(() => {
             setState(s => ({ ...s, brief: localData, briefStatus: 'complete', voiceId: localData.voice || backendVoice }));
             nav('brief');

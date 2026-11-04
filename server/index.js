@@ -33,9 +33,9 @@ const CITY_MAP = {
 const activeBriefs = new Map();
 
 // ─────────────────────────────────────────────────────────────
-// Llama live-brief generation
-// Works with the Meta Model API or any OpenAI-compatible endpoint
-// (Fireworks, Baseten, …). Configure via server/.env:
+// Muse Spark live-brief generation
+// Calls Muse Spark through the Meta Model API (OpenAI-compatible chat
+// completions). Configure via server/.env:
 //   LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 // ─────────────────────────────────────────────────────────────
 const LLM_API_KEY = process.env.LLM_API_KEY || '';
@@ -62,7 +62,7 @@ const VOICE_STYLES = {
   dont_go: 'a hilariously pessimistic doomsayer who insists this trip is a terrible idea',
 };
 
-async function callLlama(destination, voice) {
+async function callMuseSpark(destination, voice) {
   const persona = VOICE_STYLES[voice] || VOICE_STYLES.bro;
   const system = [
     'You are the Anxious Traveller pre-trip bureau — a travel analyst writing',
@@ -122,16 +122,16 @@ async function callLlama(destination, voice) {
     throw new Error(`LLM API ${res.status}: ${body}`);
   }
   const rawText = await res.text();
-  console.log(`[llama] HTTP ${res.status}, response ${rawText.length} chars, head: ${rawText.slice(0, 150).replace(/\n/g, ' ')}`);
+  console.log(`[muse-spark] HTTP ${res.status}, response ${rawText.length} chars, head: ${rawText.slice(0, 150).replace(/\n/g, ' ')}`);
   const data = JSON.parse(rawText);
   let content = data.choices?.[0]?.message?.content || '';
-  console.log(`[llama] content ${content.length} chars, finish: ${data.choices?.[0]?.finish_reason}`);
+  console.log(`[muse-spark] content ${content.length} chars, finish: ${data.choices?.[0]?.finish_reason}`);
   // Tolerate models that wrap JSON in markdown fences
   content = content.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
   return JSON.parse(content);
 }
 
-// Maps raw Llama JSON onto the exact schema the brief UI renders
+// Maps raw Muse Spark JSON onto the exact schema the brief UI renders
 function normalizeLlmBrief(raw, destination, voice) {
   const w = raw.weather || {};
   const b = raw.budget || {};
@@ -171,11 +171,11 @@ function normalizeLlmBrief(raw, destination, voice) {
     quick_read: {
       weather_md: `**Weather:** ${w.temp} (${w.condition}). High of ${w.high}, low of ${w.low}. Rain probability: ${w.rainOdds}.`,
       uv_md: `**UV Index:** ${w.uv}. ${w.uvAdvice || ''}`,
-      uv_advisory_md: `*⚡ Generated live by Llama — Meta AI Developer Hackathon.*`,
+      uv_advisory_md: `*⚡ Generated live by Muse Spark (Meta Model API).*`,
       budget_hint_md: `**Daily budget:** ${b.avgDaily}. ${b.note || ''}`,
       intro_md: `> *${vibe.intro || ''}*`,
       do_now_md: tips.map((t) => `- ${t}`).join('\n'),
-      restaurant_hook_md: `**Top food picks curated by Llama.** Real spots, iconic dishes, local prices.`,
+      restaurant_hook_md: `**Top food picks curated by Muse Spark.** Real spots, iconic dishes, local prices.`,
     },
     happening: {
       news_md: `- **Civic & Transit Advisory:** Main tourist routes and transit operating normally.\n- **Entry Protocols:** Major sights open; pre-book popular slots online where available.\n- **Seasonal Conditions:** ${w.condition} — plan outdoor sights for mornings and late afternoons.`,
@@ -186,7 +186,7 @@ function normalizeLlmBrief(raw, destination, voice) {
     knowing_md: tips.map((t) => `- ${t}`).join('\n'),
     budget_usd: { daily_low: 45, daily_mid: 95, daily_high: 220, notes: b.note || '' },
     sources: [
-      { label: 'Generated live by Llama — Meta AI Developer Hackathon', url: 'https://ai.meta.com' },
+      { label: 'Generated live by Muse Spark — Meta Model API', url: 'https://ai.meta.com' },
       { label: 'Local Tourism & Cultural Board', url: '#' },
       { label: 'Seasonal Meteorological Averages', url: '#' },
     ],
@@ -221,11 +221,11 @@ async function fetchPlaceImage(placeName, destination) {
 }
 
 // Generates a live brief, caches it in activeBriefs and returns the entry.
-async function generateBriefWithLlama(destination, voice, result_id) {
+async function generateBriefWithMuseSpark(destination, voice, result_id) {
   let entry;
   try {
-    console.log(`[llama] generating brief for "${destination}" (${voice})…`);
-    const raw = await callLlama(destination, voice);
+    console.log(`[muse-spark] generating brief for "${destination}" (${voice})…`);
+    const raw = await callMuseSpark(destination, voice);
     const brief = normalizeLlmBrief(raw, destination, voice);
 
     // Swap the generic photo pool for real photos of each landmark
@@ -243,13 +243,13 @@ async function generateBriefWithLlama(destination, voice, result_id) {
       voice,
       brief,
       audio_url: null,
-      audio_source: 'llama-live',
+      audio_source: 'muse-spark-live',
       ai_generated: true,
       created_at: new Date().toISOString(),
     };
-    console.log(`[llama] brief ready for "${destination}" (${result_id})`);
+    console.log(`[muse-spark] brief ready for "${destination}" (${result_id})`);
   } catch (e) {
-    console.error(`[llama] generation failed for "${destination}":`, e.message);
+    console.error(`[muse-spark] generation failed for "${destination}":`, e.message);
     entry = {
       status: 'failed',
       error: String(e.message || e),
@@ -288,7 +288,7 @@ app.post('/api/brief', async (req, res) => {
     }
   }
 
-  // ── Any other city on Earth → live Llama generation ──────────
+  // ── Any other city on Earth → live Muse Spark generation ──────────
   if (!demo) {
     if (!llmConfigured()) {
       // No key configured — tell the client to use its local fallback briefs
@@ -300,7 +300,7 @@ app.post('/api/brief', async (req, res) => {
     const result_id = `live-${voice}-${Date.now()}`;
     // Generated within this request: serverless functions may be frozen after
     // the response is sent, so background work is not reliable.
-    const entry = await generateBriefWithLlama(destination, voice, result_id);
+    const entry = await generateBriefWithMuseSpark(destination, voice, result_id);
     return res.json({ result_id, ...entry });
   }
 

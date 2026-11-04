@@ -116,7 +116,7 @@ function App() {
   };
 
   // Builds an instant local brief — no server, no API key needed.
-  // Used as fallback when the backend is down or Llama isn't configured.
+  // Used as fallback when the backend is down or Muse Spark isn't configured.
   const runLocalFallback = (query, voice) => {
     const profile = getDestinationProfile(query, voice);
     const synth = buildSynthesizedBrief(profile, query, voice);
@@ -178,7 +178,7 @@ function App() {
     // ── Any city on Earth ────────────────────────────────────────────────
     // Demo cities (Rome, NYC, Tokyo…) use pre-rendered briefs with audio.
     // Every other city (Ujjain, Varanasi, Jaipur, Paris, anywhere) goes to
-    // the backend, which generates a live brief with Llama. If the server
+    // the backend, which generates a live brief with Muse Spark. If the server
     // is down or no API key is configured (503), we fall back to the local
     // synthesizer: curated profiles for popular Indian destinations plus a
     // universal generator for the rest.
@@ -264,7 +264,7 @@ function App() {
           return;
         }
         if (data.status === 'failed') {
-          // Llama call failed → local fallback for non-demo cities
+          // Muse Spark call failed → local fallback for non-demo cities
           if (state.localBrief) {
             runLocalFallback(state.query, state.voiceId);
             return;

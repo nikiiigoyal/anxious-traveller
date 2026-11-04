@@ -4,6 +4,8 @@
 
 Anxious Traveller is a pre-trip briefing app for people who worry before they travel. You type where you're going, and a friendly pixel goose "investigates" the destination. It then gives you one calm, easy-to-read brief: weather, UV, budget, places to see, where to eat, local news and practical tips. You don't have to open twenty tabs to get there.
 
+Live briefs for any city are written by **Muse Spark** (`muse-spark-1.3`) through the **Meta Model API**.
+
 ---
 
 ## ✨ What it does
@@ -52,7 +54,7 @@ Anxious Traveller is a pre-trip briefing app for people who worry before they tr
                        ┌─────────────────────────┼──────────────────────────┐
                        ▼                         ▼                          ▼
               Demo city?                 Any other city?            Server down / no key?
-     (Rome, New York, Tokyo,          Ask Llama to write a          Frontend builds a brief
+     (Rome, New York, Tokyo,          Ask Muse Spark to             Frontend builds a brief
       Reykjavik, Bangkok, Cairo)      brief as JSON, in the         locally from built-in
       Load a ready-made brief         chosen voice                  destination profiles
       from server/demo-briefs/
@@ -72,7 +74,7 @@ Anxious Traveller is a pre-trip briefing app for people who worry before they tr
 2. **Request:** the frontend sends `POST /api/brief` with `{ destination, voice }` and gets back a `result_id`.
 3. **Backend decides how to answer:**
    - **Demo cities** (Rome, New York, Tokyo, Reykjavik, Bangkok, Cairo) return a pre-written brief right away. Each demo city is tied to one voice.
-   - **Any other city:** the server asks Llama for a structured JSON brief, then shapes it into the format the UI needs.
+   - **Any other city:** the server asks Muse Spark for a structured JSON brief, then shapes it into the format the UI needs.
 4. **Polling:** the loading screen calls `GET /api/brief/:id` every few seconds until the status is `complete`.
 5. **Brief:** the result is shown as a readable report.
 6. **Fallback:** if the server isn't running or no API key is set, the frontend builds a brief itself. The app always shows a result, even offline.
@@ -85,7 +87,7 @@ Anxious Traveller is a pre-trip briefing app for people who worry before they tr
 |---|---|
 | Frontend | React 18, Vite, Tailwind CSS, lucide-react icons, marked (Markdown) |
 | Backend | Node.js, Express |
-| AI | Llama via the Meta Model API (or any OpenAI-compatible endpoint, e.g. Fireworks, Baseten) |
+| AI | Muse Spark (`muse-spark-1.3`) via the Meta Model API |
 
 ---
 
@@ -112,7 +114,7 @@ anxious-traveller/
 │   └── styles/bureau.css
 ├── vercel.json              # Vercel deployment config (frontend + API services)
 └── server/
-    ├── index.js             # Express API + Llama integration
+    ├── index.js             # Express API + Muse Spark integration
     ├── demo-briefs/         # Ready-made briefs for the 6 demo cities
     └── .env.example         # Template for your API settings
 ```
@@ -128,7 +130,7 @@ npm install
 cd server && npm install && cd ..
 ```
 
-### 2. (Optional) Turn on live Llama briefs
+### 2. (Optional) Turn on live Muse Spark briefs
 
 Without this step the app still works: demo cities and the local fallback cover you.
 
@@ -139,9 +141,9 @@ cp server/.env.example server/.env
 Then fill in `server/.env`:
 
 ```env
-LLM_API_KEY=your_key_here
-LLM_BASE_URL=https://api.fireworks.ai/inference/v1     # or your Meta Model API URL
-LLM_MODEL=accounts/fireworks/models/llama-v3p3-70b-instruct
+LLM_API_KEY=your_meta_model_api_key
+LLM_BASE_URL=<Meta Model API base URL from your dashboard>
+LLM_MODEL=muse-spark-1.3
 ```
 
 > ⚠️ Never commit `server/.env`. It's already in `.gitignore`.
@@ -169,7 +171,7 @@ This starts both:
 - the **frontend** at http://localhost:5173
 - the **backend** at http://localhost:3005 (Vite forwards `/api` calls to it)
 
-Open http://localhost:5173 and try **"Rome"** (demo) or any city like **"Jaipur"** (live Llama).
+Open http://localhost:5173 and try **"Rome"** (demo) or any city like **"Jaipur"** (live Muse Spark).
 
 Other scripts:
 
@@ -190,9 +192,13 @@ Other scripts:
 | `POST` | `/api/brief` | Start a brief. Body: `{ "destination": "Rome", "voice": "bro" }`. Returns `{ "result_id": "..." }` |
 | `GET` | `/api/brief/:id` | Get a brief's status (`pending` / `complete` / `failed`) and content |
 
-If no Llama key is configured, `POST /api/brief` returns `503 llm_not_configured` for non-demo cities, and the frontend switches to its local fallback.
+If no Meta Model API key is configured, `POST /api/brief` returns `503 llm_not_configured` for non-demo cities, and the frontend switches to its local fallback.
 
 ---
 
 
 
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE).

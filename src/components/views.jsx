@@ -2647,7 +2647,8 @@ function HistoryView({ state, onOpen, onNav }) {
   useEffect(() => {
     let alive = true;
     fetch('/api/history')
-      .then((r) => r.json())
+      // No history API yet → the 404 isn't JSON; treat it as "no saved briefs".
+      .then((r) => (r.ok ? r.json() : []))
       .then((data) => {
         if (!alive) return;
         if (Array.isArray(data) && data.length > 0) {
@@ -2663,8 +2664,10 @@ function HistoryView({ state, onOpen, onNav }) {
           setItems([]); // signed-out OR no briefs yet
         }
       })
-      .catch((e) => {
-        if (alive) setError(String(e.message ?? e));
+      .catch(() => {
+        // Network/parse failure: fall back to the demo history instead of
+        // leaving the page stuck on "Loading…".
+        if (alive) setItems([]);
       });
     return () => { alive = false; };
   }, []);

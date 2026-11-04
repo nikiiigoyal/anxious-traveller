@@ -146,7 +146,20 @@ LLM_MODEL=accounts/fireworks/models/llama-v3p3-70b-instruct
 
 > ⚠️ Never commit `server/.env`. It's already in `.gitignore`.
 
-### 3. Run it
+### 3. (Optional) Turn on sign-in (Supabase)
+
+Sign-in uses [Supabase Auth](https://supabase.com/docs/guides/auth) with email + password, including confirmation emails and password reset. Without it the app works fine, and the sign-in page explains it isn't set up.
+
+1. Create a project at [supabase.com](https://supabase.com), then copy the **Project URL** and the **publishable (anon) key** from *Project Settings → API Keys*.
+2. `cp .env.example .env.local` and fill in:
+   ```env
+   VITE_SUPABASE_URL=https://<project>.supabase.co
+   VITE_SUPABASE_ANON_KEY=<publishable / anon key>
+   ```
+3. In Supabase, open *Authentication → URL Configuration*. Set **Site URL** to `https://anxious-traveller.vercel.app` and add `https://anxious-traveller.vercel.app/**` and `http://localhost:5173/**` to **Redirect URLs**.
+4. On Vercel, add the same two `VITE_` variables under *Settings → Environment Variables* and redeploy.
+
+### 4. Run it
 
 ```bash
 npm start

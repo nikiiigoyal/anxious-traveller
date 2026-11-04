@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { VOICES } from "./data/bureauData";
 import { getDestinationProfile, buildSynthesizedBrief } from "./data/destinations";
 import { MiniGoose } from "./components/geese";
+import { supabase } from "./lib/supabase";
 import {
   useTweaks, TweaksPanel, TweakSection, TweakSelect,
   TweakToggle, TweakRadio, TweakText
@@ -53,6 +54,21 @@ function App() {
     customPurpose: '',
     lang: 'en',
   });
+
+  // Supabase session (email/password or Google). null when signed out.
+  const [user, setUser] = useState(null);
+  const [recovery, setRecovery] = useState(false);
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      // Password-reset link → show "pick a new password" on the auth page.
+      if (event === 'PASSWORD_RECOVERY') { setRecovery(true); nav('auth'); }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+  useEffect(() => { setState(s => ({ ...s, signedIn: Boolean(user) || t.signedIn })); }, [user]);
 
   const toggleLang = () => {
     setState(s => ({ ...s, lang: s.lang === 'en' ? 'hi' : 'en' }));
@@ -292,14 +308,14 @@ function App() {
     <div className={isMobile ? 'viewport-mobile' : ''} data-screen-label={route}>
       <WorldBackground />
       <div className="app-frame">
-        <TopBar route={route} onNav={nav} lang={state.lang} onToggleLang={toggleLang} />
+        <TopBar route={route} onNav={nav} lang={state.lang} onToggleLang={toggleLang} user={user} />
         <main style={{flex:1,position:'relative'}}>
           {route === 'landing'  && <LandingView state={state} setState={setState} onSubmit={onSubmit} onRuiner={onRuiner} tweaks={t} />}
           {route === 'loading'  && <LoadingView state={state} onDone={() => nav('brief')} />}
           {route === 'brief'    && <BriefView state={state} setState={setState} onNav={nav} />}
           {route === 'settings' && <SettingsView state={state} setState={setState} />}
           {route === 'history'  && <HistoryView state={state} onNav={nav} onOpen={(h)=>{setState(s=>({...s,destination:h.dest,trip:h.when,voiceId:h.outfit}));nav('brief');}} />}
-          {route === 'auth'     && <AuthView onNav={nav} lang={state.lang} />}
+          {route === 'auth'     && <AuthView onNav={nav} lang={state.lang} user={user} recovery={recovery} onRecoveryDone={() => setRecovery(false)} />}
         </main>
         <GroundBand />
         <footer style={{

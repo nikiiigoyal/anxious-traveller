@@ -1,4 +1,5 @@
 import { TRANSLATIONS, HI_VOICE_OVERRIDES, getLocalizedBrief } from "../data/translations";
+import { supabase, supabaseConfigured, authRedirectUrl } from "../lib/supabase";
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { marked } from "marked";
 import {
@@ -565,7 +566,7 @@ function PurposeStrip({ purpose, customPurpose, onChange, lang = 'en' }) {
 // ============================================================
 // TOP BAR
 // ============================================================
-function TopBar({ route, onNav, lang = "en", onToggleLang }) {
+function TopBar({ route, onNav, lang = "en", onToggleLang, user }) {
   const isHi = lang === "hi";
   const tr = TRANSLATIONS[lang || "en"];
   const links = [
@@ -591,8 +592,9 @@ function TopBar({ route, onNav, lang = "en", onToggleLang }) {
             {l.label}
           </a>
         )}
-        <a href="#auth" onClick={(e) => {e.preventDefault();onNav("auth");}} className="ghost-link">
-          {tr.navSignIn}
+        <a href="#auth" onClick={(e) => {e.preventDefault();onNav("auth");}} className="ghost-link"
+           title={user?.email || undefined}>
+          {user ? (isHi ? "मेरा घोंसला" : "My nest") : tr.navSignIn}
         </a>
 
         {/* Retro Language Toggle Switch */}
@@ -2750,36 +2752,53 @@ function relativeTime(iso) {
 // ============================================================
 // AUTH
 // ============================================================
-function AuthView({ onNav }) {
-  const [mode, setMode] = useState('signup');
+function AuthView({ onNav, user, recovery, onRecoveryDone }) {
+  // modes: signup | signin | reset (request a link) | recovery (set a new password)
+  const [mode, setMode] = useState(recovery ? 'recovery' : 'signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [confirmationSent, setConfirmationSent] = useState(false);
+  useEffect(() => { if (recovery) setMode('recovery'); }, [recovery]);
 
-  // Phase 11 design integration — POST /api/auth/signup or signin.
-  // Signup success with requires_confirmation: true → playful modal asking
-  // user to click email link. Signin success → /bureau/ redirect.
+  const notConfigured = supabaseConfigured ? null :
+    "Sign-in isn't set up yet: add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (see .env.example).";
+
+  const switchMode = (m) => { setMode(m); setError(null); setNotice(null); };
+
+  // Supabase Auth: email + password, with confirmation emails and password reset.
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!email || !password || submitting) return;
+    if (submitting) return;
+    if (notConfigured) { setError(notConfigured); return; }
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     try {
-      const path = mode === 'signin' ? '/api/auth/signin' : '/api/auth/signup';
-      const res = await fetch(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? data.message ?? `auth ${res.status}`);
-      if (mode === 'signup' && data.requires_confirmation) {
-        setConfirmationSent(true);
-        return;
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email, password, options: { emailRedirectTo: authRedirectUrl() },
+        });
+        if (error) throw error;
+        // No session yet → the project requires email confirmation.
+        if (!data.session) { setConfirmationSent(true); return; }
+        onNav('landing');
+      } else if (mode === 'signin') {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        onNav('landing');
+      } else if (mode === 'reset') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: authRedirectUrl() });
+        if (error) throw error;
+        setNotice(`If ${email} has a nest, a reset link is on its way.`);
+      } else if (mode === 'recovery') {
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) throw error;
+        onRecoveryDone?.();
+        onNav('landing');
       }
-      window.location.href = '/bureau/';
     } catch (err) {
       setError(String(err.message ?? err));
     } finally {
@@ -2787,11 +2806,32 @@ function AuthView({ onNav }) {
     }
   };
 
-  const onGoogle = () => {
-    // OAuth Google sign-in — /auth/oauth?provider=google triggers Supabase OAuth
-    // flow, callback writes session cookie, returns to /bureau/.
-    window.location.href = '/api/auth/oauth?provider=google&redirect=/bureau/';
+  const onSignOut = async () => {
+    await supabase?.auth.signOut();
+    onNav('landing');
   };
+
+  if (user && mode !== 'recovery') {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card" style={{ textAlign: 'center' }}>
+          <div className="auth-goose">
+            <PixelGoose outfit="default" sparkle size={120} bob />
+          </div>
+          <div style={{ height: 50 }} />
+          <h2>You're nested.</h2>
+          <p className="sub" style={{ marginBottom: 22 }}>
+            Signed in as <strong style={{ color: 'var(--ink)' }}>{user.email}</strong>.
+          </p>
+          <button type="button" className="submit-btn" style={{ width: '100%', padding: '12px 0', justifyContent: 'center', marginBottom: 10 }} onClick={() => onNav('landing')}>
+            Back to the bureau <span className="arrow">→</span>
+          </button>
+          <button type="button" className="ghost-btn" style={{ width: '100%', justifyContent: 'center' }} onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
+      </div>);
+  }
 
   if (confirmationSent) {
     return (
@@ -2828,13 +2868,21 @@ function AuthView({ onNav }) {
             type="button"
             className="ghost-btn"
             style={{ width: '100%', justifyContent: 'center', fontSize: 12.5 }}
-            onClick={() => { setConfirmationSent(false); setMode('signin'); }}>
+            onClick={() => { setConfirmationSent(false); switchMode('signin'); }}>
             Already confirmed? Sign in →
           </button>
         </div>
       </div>);
-
   }
+
+  const titles = { signin: 'Welcome back.', signup: 'Make a nest.', reset: 'Forgot your password?', recovery: 'Pick a new password.' };
+  const subs = {
+    signin: "Sign in to keep your briefs and the goose's long memory across devices.",
+    signup: "It's free. The goose saves your briefs, re-runs them before you fly, and never emails you anything else.",
+    reset: "Tell the goose your email and it'll send you a link to set a new password.",
+    recovery: 'Almost there. Choose a new password for your nest.',
+  };
+  const submitLabels = { signin: 'Sign in', signup: 'Make my nest', reset: 'Send reset link', recovery: 'Save new password' };
 
   return (
     <div className="auth-wrap">
@@ -2843,13 +2891,10 @@ function AuthView({ onNav }) {
           <PixelGoose outfit="default" sparkle size={120} bob />
         </div>
         <div style={{ height: 50 }} />
-        <h2>{mode === 'signin' ? 'Welcome back.' : 'Make a nest.'}</h2>
-        <p className="sub">
-          {mode === 'signin' ?
-          "Sign in to keep your briefs and the goose's long memory across devices." :
-          "It's free. The goose saves your briefs, re-runs them before you fly, and never emails you anything else."}
-        </p>
+        <h2>{titles[mode]}</h2>
+        <p className="sub">{subs[mode]}</p>
 
+        {mode !== 'recovery' &&
         <div className="field">
           <label>Email</label>
           <input
@@ -2859,21 +2904,28 @@ function AuthView({ onNav }) {
             required
             autoComplete="email" />
         </div>
+        }
+        {mode !== 'reset' &&
         <div className="field">
-          <label>Password</label>
+          <label>{mode === 'recovery' ? 'New password' : 'Password'}</label>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
             autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-            minLength={8} />
+            minLength={mode === 'signin' ? undefined : 8} />
         </div>
+        }
 
         {mode === 'signin' &&
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
-            <a href="/auth/reset" style={{ fontSize: 12.5, color: 'var(--muted)' }}>Forgot password?</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); switchMode('reset'); }} style={{ fontSize: 12.5, color: 'var(--muted)' }}>Forgot password?</a>
           </div>
+        }
+
+        {notice &&
+        <div style={{ fontSize: 13, marginBottom: 12, padding: '8px 12px', border: '1px solid var(--hairline)', borderRadius: 6 }}>{notice}</div>
         }
 
         {error &&
@@ -2888,29 +2940,26 @@ function AuthView({ onNav }) {
           disabled={submitting}
           className="submit-btn"
           style={{ width: '100%', padding: '12px 0', justifyContent: 'center', opacity: submitting ? 0.6 : 1 }}>
-          {submitting ? 'One sec…' : (mode === 'signin' ? 'Sign in' : 'Make my nest')} <span className="arrow">→</span>
+          {submitting ? 'One sec…' : submitLabels[mode]} <span className="arrow">→</span>
         </button>
 
         <div className="auth-divider">or</div>
-
-        <button type="button" className="ghost-btn" style={{ width: '100%', justifyContent: 'center', marginBottom: 10 }} onClick={onGoogle}>
-          Continue with Google
-        </button>
 
         <button type="button" className="ghost-btn" style={{ width: '100%', justifyContent: 'center' }} onClick={() => onNav('landing')}>
           Continue without an account
         </button>
 
+        {mode !== 'recovery' &&
         <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 18, textAlign: 'center' }}>
-          {mode === 'signin' ?
-          <>New here? <a href="#" onClick={(e) => {e.preventDefault();setMode('signup');}} style={{ color: 'var(--ink)' }}>Make a nest →</a></> :
-          <>Already nested? <a href="#" onClick={(e) => {e.preventDefault();setMode('signin');}} style={{ color: 'var(--ink)' }}>Sign in →</a></>}
+          {mode === 'signup' ?
+          <>Already nested? <a href="#" onClick={(e) => {e.preventDefault();switchMode('signin');}} style={{ color: 'var(--ink)' }}>Sign in →</a></> :
+          <>New here? <a href="#" onClick={(e) => {e.preventDefault();switchMode('signup');}} style={{ color: 'var(--ink)' }}>Make a nest →</a></>}
         </p>
+        }
       </form>
     </div>);
 
 }
-
 
 export {
   TopBar, LandingView, LoadingView, BriefView, StaticDemoBriefView,

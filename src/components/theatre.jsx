@@ -540,6 +540,16 @@ function Dog({ x = 0, y = 0, scale = 1 }) {
   );
 }
 
+// Standing goose (body + head), used by scenes without a disguise.
+function GooseStanding({ x = 0, y = 0, scale = 1, accessory }) {
+  return (
+    <g transform={`translate(${x}, ${y}) scale(${scale})`}>
+      <ellipse cx="50" cy="110" rx="40" ry="32" fill="#FAF7F0" stroke="#0F1726" strokeWidth="2.5" />
+      <GooseHead x={30} y={50} scale={1.2} accessory={accessory} />
+    </g>
+  );
+}
+
 // ── Scenes ────────────────────────────────────────────────────────────────
 //
 // Each scene: { kind, caption, render() }
@@ -619,6 +629,13 @@ const SCENES = [
     bg: 'garden',
     image: '/bureau/scenes/05-snail.png',
     caption: 'Disguised as a snail. The garden snails are weirdly informed.',
+    render: () => (
+      <g>
+        <SnailBody x={130} y={150} />
+        <GardenSnail x={320} y={200} scale={1.1} />
+        <text x={250} y={150} fontFamily="VT323, monospace" fontSize="18" fill="#1B2638">"slow news day?"</text>
+      </g>
+    ),
   },
 
   // 6 — cat chimera meeting the local cats
@@ -626,6 +643,13 @@ const SCENES = [
     bg: 'rooftop',
     image: '/bureau/scenes/06-cats.png',
     caption: 'Disguised as a cat. The Roman cats are connected.',
+    render: () => (
+      <g>
+        <CatBody x={110} y={120} />
+        <RealCat x={300} y={150} scale={1.1} />
+        <text x={250} y={120} fontFamily="VT323, monospace" fontSize="18" fill="#1B2638">"mrrp. strike thursday."</text>
+      </g>
+    ),
   },
 
   // 7 — wizard consultation
@@ -633,6 +657,13 @@ const SCENES = [
     bg: 'wizard',
     image: '/bureau/scenes/07-wizard.png',
     caption: 'Consulting the wizard. Goose checks every source.',
+    render: () => (
+      <g>
+        <GooseStanding x={60} y={100} accessory="detective" />
+        <Wizard x={270} y={70} scale={1} />
+        <text x={150} y={70} fontFamily="VT323, monospace" fontSize="18" fill="#F2D03A">"the sources are... verified."</text>
+      </g>
+    ),
   },
 
   // 8 — fish chimera underwater
@@ -640,6 +671,13 @@ const SCENES = [
     bg: 'fishtank',
     image: '/bureau/scenes/08-fish.png',
     caption: 'Disguised as a fish. The fish at the market hear EVERYTHING.',
+    render: () => (
+      <g>
+        <FishBody x={110} y={110} />
+        <FishBuddy x={310} y={140} scale={1.1} />
+        <text x={250} y={110} fontFamily="VT323, monospace" fontSize="18" fill="#1B2638">"blub. ferry's late."</text>
+      </g>
+    ),
   },
 
   // 9 — gang back room (poker)
@@ -647,6 +685,14 @@ const SCENES = [
     bg: 'gangBackroom',
     image: '/bureau/scenes/09-pokertable.png',
     caption: 'Joined a poker game. Picked up six insights and lost €40.',
+    render: () => (
+      <g>
+        <GangMember x={40} y={120} scale={0.85} color="#5a1f1a" />
+        <GooseStanding x={170} y={100} accessory="sunglasses" />
+        <GangMember x={310} y={125} scale={0.85} color="#1F2937" />
+        <text x={140} y={80} fontFamily="VT323, monospace" fontSize="18" fill="#F2D03A">"all in. on insights."</text>
+      </g>
+    ),
   },
 
   // 10 — talking to a dog
@@ -654,6 +700,13 @@ const SCENES = [
     bg: 'park',
     image: '/bureau/scenes/10-dogs.png',
     caption: "Asked a Roman dog. He's lived here longer than most humans.",
+    render: () => (
+      <g>
+        <GooseStanding x={70} y={100} accessory="tourist" />
+        <Dog x={260} y={140} scale={1.1} />
+        <text x={180} y={100} fontFamily="VT323, monospace" fontSize="18" fill="#1B2638">"woof. avoid the main square."</text>
+      </g>
+    ),
   },
 
   // 11 — post office / delivery
@@ -661,6 +714,13 @@ const SCENES = [
     bg: 'office',
     image: '/bureau/scenes/11-postoffice.png',
     caption: "Slipped into the post office. Heard who's mailing what.",
+    render: () => (
+      <g>
+        <GooseStanding x={70} y={100} accessory="reporter" />
+        <Pigeon x={280} y={150} scale={1.2} flip />
+        <Pigeon x={340} y={165} scale={1} />
+      </g>
+    ),
   },
 
   // 12 — pizza delivery finale
@@ -668,6 +728,13 @@ const SCENES = [
     bg: 'park',
     image: '/bureau/scenes/12-pizzadelivery.png',
     caption: "Tailed a pizza courier through the bike lane. He knows every restaurant.",
+    render: () => (
+      <g>
+        <GooseStanding x={60} y={100} accessory="detective" />
+        <Pigeon x={300} y={160} scale={1.1} flip />
+        <text x={170} y={100} fontFamily="VT323, monospace" fontSize="18" fill="#1B2638">"best margherita? follow me."</text>
+      </g>
+    ),
   },
 ];
 
@@ -699,6 +766,8 @@ function InvestigationTheatre({ tick = 0, scenesOverride, totalSec = 20, target:
     ? `${(minutesSaved / 60).toFixed(1)} hours`
     : `${minutesSaved} minutes`;
   const isDone = progress >= 0.98;
+  const [imgLoaded, setImgLoaded] = React.useState({});
+  const [imgFailed, setImgFailed] = React.useState({});
 
   return (
     <div className="theatre">
@@ -708,13 +777,19 @@ function InvestigationTheatre({ tick = 0, scenesOverride, totalSec = 20, target:
         <span className="theatre-key-coda">of doomscrolling</span>
       </div>
       <div className="theatre-frame" key={idx}>
-        {scene.image ? (
-          <img src={scene.image} alt="" className="theatre-img" />
-        ) : (
+        {/* Pixel-art SVG shows until the scene's image loads, and stays if the
+            image is missing (the PNGs in public/bureau/scenes/ are optional). */}
+        {!imgLoaded[idx] && (
           <svg viewBox="0 0 460 280" className="theatre-svg" aria-hidden>
             <Backdrop kind={scene.bg} />
-            <g className="theatre-actors">{scene.render()}</g>
+            <g className="theatre-actors">{scene.render?.()}</g>
           </svg>
+        )}
+        {scene.image && !imgFailed[idx] && (
+          <img src={scene.image} alt="" className="theatre-img"
+            style={imgLoaded[idx] ? undefined : { display: 'none' }}
+            onLoad={() => setImgLoaded((m) => ({ ...m, [idx]: true }))}
+            onError={() => setImgFailed((m) => ({ ...m, [idx]: true }))} />
         )}
         <div className="theatre-caption" key={`cap-${idx}`}>
           <span className="theatre-quote">"</span>

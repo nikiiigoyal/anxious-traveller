@@ -3,8 +3,10 @@ import { createClient } from '@supabase/supabase-js';
 // Browser Supabase client. Configure in `.env.local` (and in Vercel):
 //   VITE_SUPABASE_URL=https://<project>.supabase.co
 //   VITE_SUPABASE_ANON_KEY=<public anon key>
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Accept a pasted endpoint like https://x.supabase.co/rest/v1/ — keep the origin.
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const url = (() => { try { return rawUrl ? new URL(rawUrl).origin : ''; } catch { return ''; } })();
+const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
 export const supabaseConfigured = Boolean(url && anonKey);
 

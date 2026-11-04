@@ -503,13 +503,9 @@ function PixelGoose({
 // Tiny brand mark — illustrated detective goose logo
 function MiniGoose({ size = 28 }) {
   return (
-    <img
-      src="/bureau/assets/logo.png"
-      width={size}
-      height={size}
-      alt="Anxious Traveller"
-      style={{ verticalAlign: 'middle', display: 'inline-block', objectFit: 'contain', height: "47px", width: "49px", padding: "0px 0px 0px 14px" }} />);
-
+    <span style={{ display: 'inline-block', verticalAlign: 'middle', marginLeft: 10 }}>
+      <PixelGoose outfit="detective" size={size} />
+    </span>);
 
 }
 

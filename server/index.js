@@ -192,12 +192,48 @@ function normalizeLlmBrief(raw, destination, voice) {
   };
 }
 
+// Fetches a real photo of a landmark from Wikipedia (no API key needed).
+// Uses search so inexact names still match ("Mahakaleshwar Jyotirlinga Temple"
+// → "Mahakaleshwar Temple, Ujjain"). Falls back to null — caller uses IMAGE_POOL.
+async function fetchPlaceImage(placeName, destination) {
+  const queries = [`${placeName} ${destination}`, placeName];
+  for (const q of queries) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=1&prop=pageimages&pithumbsize=700&format=json&origin=*`;
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { 'User-Agent': 'AnxiousTraveller/1.0 (hackathon demo)' },
+      });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const d = await res.json();
+      const pages = Object.values(d.query?.pages || {});
+      const img = pages[0]?.thumbnail?.source;
+      if (img) return img;
+    } catch {
+      // try next query
+    }
+  }
+  return null;
+}
+
 // Fire-and-forget: fills activeBriefs[result_id] when done; polled via GET /api/brief/:id
 async function generateBriefWithLlama(destination, voice, result_id) {
   try {
     console.log(`[llama] generating brief for "${destination}" (${voice})…`);
     const raw = await callLlama(destination, voice);
     const brief = normalizeLlmBrief(raw, destination, voice);
+
+    // Swap the generic photo pool for real photos of each landmark
+    await Promise.all(
+      brief.places_with_images.map(async (p) => {
+        const img = await fetchPlaceImage(p.name, brief.destination);
+        if (img) p.image = img;
+      })
+    );
+
     activeBriefs.set(result_id, {
       status: 'complete',
       brief_id: result_id,

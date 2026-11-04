@@ -1466,7 +1466,7 @@ function BriefView({ state, setState, onNav }) {
         </GooseBubble>
       </div>
 
-      <AudioPlayer voice={voice} audioUrl={state.brief?.audio_url} narration={buildNarration(state.brief?.brief)} />
+      <AudioPlayer voice={voice} audioUrl={state.brief?.audio_url} narration={buildNarration(state.brief?.brief)} lang={state.lang} />
     </div>);
 
 }
@@ -2064,7 +2064,7 @@ function StaticDemoBriefView({ state, setState, onNav, voice, brief: rawBrief })
       </div>
 
       <AudioArrow />
-      <AudioPlayer voice={voice} audioUrl={state.brief?.audio_url} narration={buildNarration(brief)} />
+      <AudioPlayer voice={voice} audioUrl={state.brief?.audio_url} narration={buildNarration(brief)} lang={state.lang} />
     </div>
   );
 }
@@ -2310,10 +2310,65 @@ function buildNarration(brief) {
   return parts.join(' ');
 }
 
-// Persona flavor for browser speech — pitch per voice id.
-const TTS_PITCH = { jarvis: 0.9, bro: 1.1, bestie: 1.3, family: 1.0, pet_parent: 1.2, dont_go: 0.7, ruiner: 0.7 };
+// Persona flavor for browser speech. Kept subtle: big pitch shifts make the
+// browser voice sound robotic / chipmunk-like.
+const TTS_PITCH = { jarvis: 0.95, bro: 1.02, bestie: 1.08, family: 1.0, pet_parent: 1.05, dont_go: 0.92, ruiner: 0.92 };
 
-function AudioPlayer({ voice, audioUrl, narration }) {
+// macOS ships joke voices (Bubbles, Zarvox, Bad News…) — never use them.
+const NOVELTY_VOICES = /^(albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|ralph|kathy|grandma|grandpa|eddy|flo|reed|rocko|sandy|shelley|deranged|hysterical|pipe organ)\b/i;
+
+// Pick the most natural-sounding installed voice for the language.
+function pickTtsVoice(lang) {
+  const all = window.speechSynthesis.getVoices().filter((v) => !NOVELTY_VOICES.test(v.name));
+  const prefix = lang === 'hi' ? 'hi' : 'en';
+  const pool = all.filter((v) => v.lang?.toLowerCase().startsWith(prefix));
+  if (!pool.length) return null;
+  const score = (v) => {
+    let sc = 0;
+    if (/premium|enhanced|natural|neural/i.test(v.name)) sc += 50;
+    if (/google|microsoft/i.test(v.name)) sc += 30;
+    if (/^(samantha|daniel|karen|moira|tessa|serena|ava|allison|susan|lekha|aria|jenny|guy)\b/i.test(v.name)) sc += 20;
+    if (prefix === 'en' && /en[-_](us|gb|in)/i.test(v.lang)) sc += 10;
+    if (v.localService) sc += 2;
+    return sc;
+  };
+  return [...pool].sort((a, b) => score(b) - score(a))[0];
+}
+
+// Turn markdown-ish brief text into something a speech engine reads cleanly.
+function cleanForSpeech(text = '') {
+  return text
+    .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F1E6}-\u{1F1FF}]/gu, '')
+    .replace(/°\s?C\b/g, ' degrees Celsius')
+    .replace(/°\s?F\b/g, ' degrees Fahrenheit')
+    .replace(/°/g, ' degrees')
+    .replace(/(\d)\s?[–—-]\s?(\d)/g, '$1 to $2')
+    .replace(/\s[–—]\s|[–—]/g, ', ')
+    .replace(/\$\$\$\$?/g, 'expensive')
+    .replace(/\$\$/g, 'moderately priced')
+    .replace(/\s\/\s/g, ', ')
+    .replace(/&/g, ' and ')
+    .replace(/~/g, 'about ')
+    .replace(/[*_`#>|\[\]{}]/g, '')
+    .replace(/\s+([,.!?])/g, '$1')
+    .replace(/([,.])\1+/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Split into sentence-sized chunks: Chrome garbles or silently cuts off
+// long single utterances, and short chunks make pause/seek reliable.
+function chunkForSpeech(text) {
+  const chunks = [];
+  const re = /[^.!?।]+[.!?।]*\s*/g;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m[0].trim()) chunks.push({ start: m.index, text: m[0].trim() });
+  }
+  return chunks;
+}
+
+function AudioPlayer({ voice, audioUrl, narration: rawNarration, lang = 'en' }) {
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
   const [speed, setSpeed] = useState('1.0');
@@ -2321,12 +2376,25 @@ function AudioPlayer({ voice, audioUrl, narration }) {
   const [total, setTotal] = useState(38);
   const trackRef = useRef(null);
   const audioRef = useRef(null);
-  const utterRef = useRef(null);
+  const sessionRef = useRef(0);
+  const ttsVoiceRef = useRef(null);
   const posRef = useRef(0);
   useEffect(() => { posRef.current = pos; }, [pos]);
 
+  const narration = useMemo(() => cleanForSpeech(rawNarration || ''), [rawNarration]);
+  const chunks = useMemo(() => chunkForSpeech(narration), [narration]);
+
   // TTS mode: no audio file, but narration text + browser speech synthesis.
   const useTts = !audioUrl && !!narration && typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+  // Voices load asynchronously in most browsers — re-pick when they arrive.
+  useEffect(() => {
+    if (!useTts) return;
+    const update = () => { ttsVoiceRef.current = pickTtsVoice(lang); };
+    update();
+    window.speechSynthesis.addEventListener('voiceschanged', update);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', update);
+  }, [useTts, lang]);
 
   // Bind real HTMLAudioElement when audioUrl present. Falls back to live
   // speech synthesis (TTS) when narration exists, mock animation otherwise.
@@ -2349,33 +2417,46 @@ function AudioPlayer({ voice, audioUrl, narration }) {
     };
   }, [audioUrl]);
 
+  const stopTts = () => {
+    sessionRef.current += 1; // invalidates callbacks of queued utterances
+    window.speechSynthesis.cancel();
+  };
+
   // TTS: estimate spoken duration (~150 wpm at 1.0×); stop speech on change/unmount.
   useEffect(() => {
     if (!useTts) return;
     const words = narration.split(/\s+/).filter(Boolean).length;
     setTotal(Math.max(20, Math.round(words / 2.5)));
-    return () => window.speechSynthesis.cancel();
+    return () => stopTts();
   }, [narration, useTts]);
 
+  // Queue sentence chunks starting from the sentence that contains charOffset.
   const speakFrom = (charOffset) => {
-    const u = new SpeechSynthesisUtterance(narration.slice(charOffset));
-    u.rate = parseFloat(speed);
-    u.pitch = TTS_PITCH[voice?.id] ?? 1.0;
-    u.onboundary = (e) => {
-      if (typeof e.charIndex === 'number') {
-        setPos(((charOffset + e.charIndex) / narration.length) * total);
+    stopTts();
+    const session = sessionRef.current;
+    let idx = chunks.findIndex((c, i) => i === chunks.length - 1 || chunks[i + 1].start > charOffset);
+    if (idx < 0) idx = 0;
+    const ttsVoice = ttsVoiceRef.current;
+    chunks.slice(idx).forEach((c, i, arr) => {
+      const u = new SpeechSynthesisUtterance(c.text);
+      if (ttsVoice) u.voice = ttsVoice;
+      u.lang = ttsVoice?.lang || (lang === 'hi' ? 'hi-IN' : 'en-US');
+      u.rate = parseFloat(speed);
+      u.pitch = TTS_PITCH[voice?.id] ?? 1.0;
+      u.onstart = () => { if (sessionRef.current === session) setPos((c.start / narration.length) * total); };
+      u.onboundary = (e) => {
+        if (sessionRef.current === session && typeof e.charIndex === 'number') {
+          setPos(((c.start + e.charIndex) / narration.length) * total);
+        }
+      };
+      if (i === arr.length - 1) {
+        u.onend = () => { if (sessionRef.current === session) { setPlaying(false); setPos(0); } };
       }
-    };
-    u.onend = () => {
-      if (utterRef.current !== u) return; // superseded by seek/speed restart
-      utterRef.current = null;
-      setPlaying(false);
-      setPos(0);
-    };
-    u.onerror = () => { if (utterRef.current === u) { utterRef.current = null; setPlaying(false); } };
-    utterRef.current = u;
-    window.speechSynthesis.cancel(); // previous utterance's onend is ignored via ref check
-    window.speechSynthesis.speak(u);
+      u.onerror = (e) => {
+        if (sessionRef.current === session && e.error !== 'interrupted' && e.error !== 'canceled') setPlaying(false);
+      };
+      window.speechSynthesis.speak(u);
+    });
   };
 
   // Real playback control when bound to HTMLAudioElement, TTS, or mock
@@ -2387,12 +2468,10 @@ function AudioPlayer({ voice, audioUrl, narration }) {
       return;
     }
     if (useTts) {
-      if (playing) {
-        if (window.speechSynthesis.paused && utterRef.current) window.speechSynthesis.resume();
-        else speakFrom(Math.round((posRef.current / total) * narration.length) || 0);
-      } else if (utterRef.current) {
-        window.speechSynthesis.pause();
-      }
+      // Pause = stop and remember position; play resumes from that sentence.
+      // (Native speechSynthesis.pause/resume is unreliable in Chrome.)
+      if (playing) speakFrom(Math.round((posRef.current / total) * narration.length) || 0);
+      else stopTts();
       return;
     }
     // Mock animation fallback
